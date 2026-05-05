@@ -4,6 +4,7 @@ use fastnbt::Value;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::colors::RGBTuple;
 
@@ -60,15 +61,22 @@ pub struct Block {
     id: u8,
 }
 
-// Extended block with dynamic properties
+/// Block with NBT properties shared via Arc so identical compounds reuse one allocation.
 #[derive(Clone, Debug)]
 pub struct BlockWithProperties {
     pub block: Block,
-    pub properties: Option<Value>,
+    pub properties: Option<Arc<Value>>,
 }
 
 impl BlockWithProperties {
     pub fn new(block: Block, properties: Option<Value>) -> Self {
+        Self {
+            block,
+            properties: properties.map(Arc::new),
+        }
+    }
+
+    pub fn from_arc(block: Block, properties: Option<Arc<Value>>) -> Self {
         Self { block, properties }
     }
 
@@ -703,11 +711,11 @@ impl Block {
     }
 }
 
-// Cache for stair blocks with properties
+// Cache of stair NBT compounds shared across placements via Arc.
 use std::sync::Mutex;
 
 #[allow(clippy::type_complexity)]
-static STAIR_CACHE: Lazy<Mutex<HashMap<(u8, StairFacing, StairShape), BlockWithProperties>>> =
+static STAIR_CACHE: Lazy<Mutex<HashMap<(u8, StairFacing, StairShape), Arc<Value>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 // General function to create any stair block with facing and shape properties
@@ -718,22 +726,18 @@ pub fn create_stair_with_properties(
 ) -> BlockWithProperties {
     let cache_key = (base_stair_block.id(), facing, shape);
 
-    // Check cache first
     {
         let cache = STAIR_CACHE.lock().unwrap();
-        if let Some(cached_block) = cache.get(&cache_key) {
-            return cached_block.clone();
+        if let Some(cached_props) = cache.get(&cache_key) {
+            return BlockWithProperties::from_arc(base_stair_block, Some(cached_props.clone()));
         }
     }
 
-    // Create properties
     let mut map = HashMap::new();
     map.insert(
         "facing".to_string(),
         Value::String(facing.as_str().to_string()),
     );
-
-    // Only add shape if it's not straight (default)
     if !matches!(shape, StairShape::Straight) {
         map.insert(
             "shape".to_string(),
@@ -741,21 +745,22 @@ pub fn create_stair_with_properties(
         );
     }
 
-    let properties = Value::Compound(map);
-    let block_with_props = BlockWithProperties::new(base_stair_block, Some(properties));
-
-    // Cache the result
+    let properties = Arc::new(Value::Compound(map));
     {
         let mut cache = STAIR_CACHE.lock().unwrap();
-        cache.insert(cache_key, block_with_props.clone());
+        cache.insert(cache_key, properties.clone());
     }
 
-    block_with_props
+    BlockWithProperties::from_arc(base_stair_block, Some(properties))
 }
-// Add half=top to make it upside-down
+// Add half=top to make it upside-down.
 pub fn top_stair(mut stair: BlockWithProperties) -> BlockWithProperties {
-    if let Some(Value::Compound(ref mut map)) = stair.properties {
-        map.insert("half".to_string(), Value::String("top".to_string()));
+    if let Some(props) = stair.properties.as_ref() {
+        if let Value::Compound(map) = props.as_ref() {
+            let mut new_map = map.clone();
+            new_map.insert("half".to_string(), Value::String("top".to_string()));
+            stair.properties = Some(Arc::new(Value::Compound(new_map)));
+        }
     }
     stair
 }
@@ -1414,11 +1419,7 @@ static DEFINED_COLORS: &[ColorBlockMapping] = &[
 ];
 
 // Function to randomly select building wall block with alternatives
-pub fn get_building_wall_block_for_color(color: RGBTuple) -> Block {
-    use rand::Rng;
-    let mut rng = rand::rng();
-
-    // Find the closest color match
+pub fn get_building_wall_block_for_color(color: RGBTuple, rng: &mut impl rand::Rng) -> Block {
     let closest_color = DEFINED_COLORS
         .iter()
         .min_by_key(|(defined_color, _)| crate::colors::rgb_distance(&color, defined_color));
@@ -1426,16 +1427,12 @@ pub fn get_building_wall_block_for_color(color: RGBTuple) -> Block {
     if let Some((_, options)) = closest_color {
         options[rng.random_range(0..options.len())]
     } else {
-        // This should never happen, but fallback just in case
-        get_fallback_building_block()
+        get_fallback_building_block(rng)
     }
 }
 
 // Function to get a random fallback building block when no color attribute is specified
-pub fn get_fallback_building_block() -> Block {
-    use rand::Rng;
-    let mut rng = rand::rng();
-
+pub fn get_fallback_building_block(rng: &mut impl rand::Rng) -> Block {
     let fallback_options = [
         BLACKSTONE,
         BLACK_TERRACOTTA,
@@ -1468,10 +1465,7 @@ pub fn get_fallback_building_block() -> Block {
 }
 
 // Function to get a random castle wall block
-pub fn get_castle_wall_block() -> Block {
-    use rand::Rng;
-    let mut rng = rand::rng();
-
+pub fn get_castle_wall_block(rng: &mut impl rand::Rng) -> Block {
     let castle_wall_options = [
         STONE_BRICKS,
         CHISELED_STONE_BRICKS,
@@ -1488,10 +1482,7 @@ pub fn get_castle_wall_block() -> Block {
 }
 
 /// Maps an OSM building:material to a wall block, or None if unrecognized.
-pub fn get_wall_block_for_material(material: &str) -> Option<Block> {
-    use rand::Rng;
-    let mut rng = rand::rng();
-
+pub fn get_wall_block_for_material(material: &str, rng: &mut impl rand::Rng) -> Option<Block> {
     let normalized: String = material
         .chars()
         .filter(|c| !c.is_whitespace() && *c != '_' && *c != '-')
@@ -1512,7 +1503,7 @@ pub fn get_wall_block_for_material(material: &str) -> Option<Block> {
                 WHITE_CONCRETE,
                 SMOOTH_STONE,
             ],
-            "plaster" | "stucco" | "render" | "rendering" | "lime_render" => &[
+            "plaster" | "stucco" | "render" | "rendering" | "limerender" => &[
                 WHITE_CONCRETE,
                 LIGHT_GRAY_CONCRETE,
                 QUARTZ_BLOCK,
@@ -1553,10 +1544,7 @@ pub fn get_wall_block_for_material(material: &str) -> Option<Block> {
 }
 
 /// Maps an OSM roof:material to a roof block, or None if unrecognized.
-pub fn get_roof_block_for_material(material: &str) -> Option<Block> {
-    use rand::Rng;
-    let mut rng = rand::rng();
-
+pub fn get_roof_block_for_material(material: &str, rng: &mut impl rand::Rng) -> Option<Block> {
     let normalized: String = material
         .chars()
         .filter(|c| !c.is_whitespace() && *c != '_' && *c != '-')

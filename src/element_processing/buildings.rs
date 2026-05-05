@@ -810,7 +810,7 @@ impl BuildingStyle {
         // === Block Palette ===
 
         // Priority: OSM tag > preset > category palette.
-        let wall_block = determine_wall_block_from_tags(element, category)
+        let wall_block = determine_wall_block_from_tags(element, category, rng)
             .or(preset.wall_block)
             .unwrap_or_else(|| determine_wall_block(element, category, rng));
 
@@ -1179,6 +1179,7 @@ fn calculate_start_y_offset(
 fn determine_wall_block_from_tags(
     element: &ProcessedWay,
     category: BuildingCategory,
+    rng: &mut impl Rng,
 ) -> Option<Block> {
     if category == BuildingCategory::GlassySkyscraper {
         // GlassySkyscraper walls must stay glass.
@@ -1193,7 +1194,7 @@ fn determine_wall_block_from_tags(
         .or_else(|| element.tags.get("building:facade:material"))
         .or_else(|| element.tags.get("facade:material"))
     {
-        if let Some(block) = get_wall_block_for_material(material) {
+        if let Some(block) = get_wall_block_for_material(material, rng) {
             return Some(block);
         }
     }
@@ -1203,7 +1204,7 @@ fn determine_wall_block_from_tags(
         .or_else(|| element.tags.get("colour"));
     if let Some(building_colour) = colour {
         if let Some(rgb) = color_text_to_rgb_tuple(building_colour) {
-            return Some(get_building_wall_block_for_color(rgb));
+            return Some(get_building_wall_block_for_color(rgb, rng));
         }
     }
     None
@@ -1217,7 +1218,7 @@ fn determine_wall_block(
 ) -> Block {
     // Historic castles have their own special treatment
     if element.tags.get("historic") == Some(&"castle".to_string()) {
-        return get_castle_wall_block();
+        return get_castle_wall_block(rng);
     }
 
     // GlassySkyscraper walls must stay glass.
@@ -1228,7 +1229,7 @@ fn determine_wall_block(
             .or_else(|| element.tags.get("building:facade:material"))
             .or_else(|| element.tags.get("facade:material"))
         {
-            if let Some(block) = get_wall_block_for_material(material) {
+            if let Some(block) = get_wall_block_for_material(material, rng) {
                 return block;
             }
         }
@@ -1239,7 +1240,7 @@ fn determine_wall_block(
             .or_else(|| element.tags.get("colour"));
         if let Some(building_colour) = colour {
             if let Some(rgb) = color_text_to_rgb_tuple(building_colour) {
-                return get_building_wall_block_for_color(rgb);
+                return get_building_wall_block_for_color(rgb, rng);
             }
         }
     }
@@ -1330,7 +1331,7 @@ fn get_wall_block_for_category(category: BuildingCategory, rng: &mut impl Rng) -
             ];
             GLASSY_WALL_OPTIONS[rng.random_range(0..GLASSY_WALL_OPTIONS.len())]
         }
-        BuildingCategory::Default => get_fallback_building_block(),
+        BuildingCategory::Default => get_fallback_building_block(rng),
     }
 }
 
@@ -1599,11 +1600,12 @@ fn generate_roof_only_structure(
 
     // Pick a block for the roof surface.
     // Priority: roof:material > roof:colour > building/colour > default.
+    let mut rng = element_rng(element.id);
     let roof_block = element
         .tags
         .get("roof:material")
         .or_else(|| element.tags.get("material"))
-        .and_then(|m| get_roof_block_for_material(m))
+        .and_then(|m| get_roof_block_for_material(m, &mut rng))
         .or_else(|| {
             element
                 .tags
@@ -1611,7 +1613,7 @@ fn generate_roof_only_structure(
                 .or_else(|| element.tags.get("building:colour"))
                 .or_else(|| element.tags.get("colour"))
                 .and_then(|c| color_text_to_rgb_tuple(c))
-                .map(get_building_wall_block_for_color)
+                .map(|rgb| get_building_wall_block_for_color(rgb, &mut rng))
                 .map(roof_friendly_block)
         })
         .unwrap_or(STONE_BRICK_SLAB);
@@ -4271,6 +4273,9 @@ pub fn generate_buildings(
             let skip_interior = matches!(
                 building_type,
                 "garage" | "shed" | "parking" | "roof" | "bridge"
+            ) || matches!(
+                config.condition,
+                BuildingCondition::Construction | BuildingCondition::Ruined
             );
 
             if !skip_interior && cached_floor_area.len() > 100 {
@@ -4863,9 +4868,18 @@ fn generate_residential_antenna(
         .min_by_key(|&&(x, z)| (x - cx).pow(2) + (z - cz).pow(2))
         .unwrap();
 
+    // Match the slope formula used by gabled/hipped/pyramidal plus the +1 lift.
+    let min_x = roof_area.iter().map(|p| p.0).min().unwrap();
+    let max_x = roof_area.iter().map(|p| p.0).max().unwrap();
+    let min_z = roof_area.iter().map(|p| p.1).min().unwrap();
+    let max_z = roof_area.iter().map(|p| p.1).max().unwrap();
+    let narrow_half = (max_x - min_x).min(max_z - min_z) / 2;
+    let local_boost = ((narrow_half as f64) * 0.85).round().max(1.0) as i32;
+    let wall_cap = ((config.building_height as f64) * 0.6).round().max(1.0) as i32;
+    let estimated_rise = local_boost.min(wall_cap) + 1;
     let anchor_y = config.start_y_offset
         + config.building_height
-        + ((config.building_height as f64 * 0.6).round() as i32).max(2)
+        + estimated_rise
         + 2
         + config.abs_terrain_offset;
     editor.set_block_absolute(LIGHTNING_ROD, best_x, anchor_y, best_z, None, None);
@@ -6593,16 +6607,17 @@ fn generate_roof(
     );
 
     // OSM roof:material / roof:colour override the preset.
+    let mut roof_rng = element_rng(element.id ^ 0xF00F_C010_BA5E_F00D);
     let osm_roof_block = element
         .tags
         .get("roof:material")
-        .and_then(|m| get_roof_block_for_material(m))
+        .and_then(|m| get_roof_block_for_material(m, &mut roof_rng))
         .or_else(|| {
             element
                 .tags
                 .get("roof:colour")
                 .and_then(|c| color_text_to_rgb_tuple(c))
-                .map(get_building_wall_block_for_color)
+                .map(|rgb| get_building_wall_block_for_color(rgb, &mut roof_rng))
                 .map(roof_friendly_block)
         });
 

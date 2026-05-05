@@ -25,7 +25,9 @@ pub fn generate_man_made(editor: &mut WorldEditor, element: &ProcessedElement, a
             "antenna" => generate_antenna(editor, element),
             "chimney" => generate_chimney(editor, element),
             "water_well" => generate_water_well(editor, element),
-            "water_tower" => generate_water_tower(editor, element, args),
+            "water_tower" | "silo" | "storage_tank" => {
+                generate_tank_structure(editor, element, args);
+            }
             "mast" => generate_antenna(editor, element),
             _ => {} // Unknown man_made type, ignore
         }
@@ -496,7 +498,9 @@ pub fn generate_man_made_nodes(editor: &mut WorldEditor, node: &ProcessedNode, a
             "antenna" => generate_antenna(editor, &element),
             "chimney" => generate_chimney(editor, &element),
             "water_well" => generate_water_well(editor, &element),
-            "water_tower" => generate_water_tower(editor, &element, args),
+            "water_tower" | "silo" | "storage_tank" => {
+                generate_tank_structure(editor, &element, args);
+            }
             "mast" => generate_antenna(editor, &element),
             _ => {} // Unknown man_made type, ignore
         }
