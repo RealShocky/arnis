@@ -173,7 +173,7 @@ impl Block {
             72 => "sandstone",
             73 => "scaffolding",
             74 => "smooth_quartz",
-            75 => "smooth_red_sandstone",
+            75 => "spruce_stairs",
             76 => "smooth_sandstone",
             77 => "smooth_stone",
             78 => "sponge",
@@ -184,7 +184,7 @@ impl Block {
             83 => "stone_bricks",
             84 => "stone",
             85 => "terracotta",
-            86 => "warped_planks",
+            86 => "dark_oak_stairs",
             87 => "water",
             88 => "white_concrete",
             89 => "azure_bluet",
@@ -195,7 +195,7 @@ impl Block {
             94 => "dandelion",
             95 => "yellow_wool",
             96 => "lime_concrete",
-            97 => "cyan_wool",
+            97 => "red_nether_brick_stairs",
             98 => "blue_concrete",
             99 => "purple_concrete",
             100 => "red_concrete",
@@ -210,7 +210,7 @@ impl Block {
             109 => "wheat",
             110 => "bedrock",
             111 => "snow_block",
-            112 => "snow",
+            112 => "andesite_stairs",
             113 => "oak_sign",
             114 => "andesite_wall",
             115 => "stone_brick_wall",
@@ -222,7 +222,7 @@ impl Block {
             130 => "copper_ore",
             131 => "clay",
             132 => "dirt_path",
-            133 => "ice",
+            133 => "waxed_exposed_cut_copper_stairs",
             134 => "packed_ice",
             135 => "mud",
             136 => "dead_bush",
@@ -867,25 +867,22 @@ pub const MAGENTA_CONCRETE: Block = Block::new(101);
 pub const YELLOW_TERRACOTTA: Block = Block::new(104);
 pub const WAXED_OXIDIZED_COPPER: Block = Block::new(103);
 pub const WAXED_COPPER_BLOCK: Block = Block::new(195);
-// Three more copper variants for the LIGHT_GRAY_TERRACOTTA variety mix:
-// the user picked these specifically because their muted brown-grey
-// average colours sit close to LIGHT_GRAY_TERRACOTTA (135, 107, 98).
 pub const WAXED_EXPOSED_COPPER: Block = Block::new(199);
 pub const WAXED_EXPOSED_CHISELED_COPPER: Block = Block::new(204);
 pub const WAXED_EXPOSED_CUT_COPPER: Block = Block::new(215);
 pub const RED_NETHER_BRICKS: Block = Block::new(68);
-// Cherry blossom tree blocks (1.20+). New tree variant for visual variety.
 pub const CHERRY_LOG: Block = Block::new(230);
 pub const CHERRY_LEAVES: Block = Block::new(231);
-// Extra stair variants for richer roof matching across stone families.
 pub const COBBLESTONE_STAIRS: Block = Block::new(17);
 pub const MOSSY_STONE_BRICK_STAIRS: Block = Block::new(56);
 pub const MOSSY_COBBLESTONE_STAIRS: Block = Block::new(62);
 pub const DEEPSLATE_BRICK_STAIRS: Block = Block::new(63);
 pub const POLISHED_DEEPSLATE_STAIRS: Block = Block::new(64);
-// IDs 38 and 102 were spare in the name table (mapped to "jungle_planks" /
-// "brown_wool" with no const usage anywhere). Repurpose them for the two
-// copper-stair variants so WAXED_OXIDIZED_COPPER walls have a matching stair.
+pub const SPRUCE_STAIRS: Block = Block::new(75);
+pub const DARK_OAK_STAIRS: Block = Block::new(86);
+pub const RED_NETHER_BRICK_STAIRS: Block = Block::new(97);
+pub const ANDESITE_STAIRS: Block = Block::new(112);
+pub const WAXED_EXPOSED_CUT_COPPER_STAIRS: Block = Block::new(133);
 pub const WAXED_CUT_COPPER_STAIRS: Block = Block::new(38);
 pub const WAXED_OXIDIZED_CUT_COPPER_STAIRS: Block = Block::new(102);
 pub const SNOW_BLOCK: Block = Block::new(111);
@@ -1065,7 +1062,7 @@ pub fn get_stair_block_for_material(material: Block) -> Block {
         CRACKED_STONE_BRICKS => STONE_BRICK_STAIRS,
         CHISELED_STONE_BRICKS => STONE_BRICK_STAIRS,
         TUFF => COBBLESTONE_STAIRS,
-        ANDESITE => POLISHED_ANDESITE_STAIRS,
+        ANDESITE => ANDESITE_STAIRS,
         POLISHED_ANDESITE => POLISHED_ANDESITE_STAIRS,
         SMOOTH_STONE => POLISHED_ANDESITE_STAIRS,
         DIORITE => POLISHED_DIORITE_STAIRS,
@@ -1081,7 +1078,7 @@ pub fn get_stair_block_for_material(material: Block) -> Block {
         POLISHED_BLACKSTONE_BRICKS => POLISHED_BLACKSTONE_BRICK_STAIRS,
         BLACK_TERRACOTTA => POLISHED_BLACKSTONE_BRICK_STAIRS,
 
-        // ─── Warm reds / browns ─────────────────────────────────────
+        // Warm reds and browns
         BRICK => BRICK_STAIRS,
         TERRACOTTA => BRICK_STAIRS,
         ORANGE_TERRACOTTA => BRICK_STAIRS,
@@ -1089,7 +1086,7 @@ pub fn get_stair_block_for_material(material: Block) -> Block {
         GRANITE => POLISHED_GRANITE_STAIRS,
         POLISHED_GRANITE => POLISHED_GRANITE_STAIRS,
 
-        // ─── Mud / brown / muted earth tones ────────────────────────
+        // Mud and earth tones
         MUD_BRICKS => MUD_BRICK_STAIRS,
         MUD => MUD_BRICK_STAIRS,
         BROWN_CONCRETE => MUD_BRICK_STAIRS,
@@ -1100,41 +1097,41 @@ pub fn get_stair_block_for_material(material: Block) -> Block {
         LIGHT_GRAY_TERRACOTTA => MUD_BRICK_STAIRS,
         LIGHT_BLUE_TERRACOTTA => STONE_BRICK_STAIRS,
 
-        // ─── Yellow / sand tones ────────────────────────────────────
+        // Yellow and sand tones
         END_STONE_BRICKS => END_STONE_BRICK_STAIRS,
         YELLOW_TERRACOTTA => SMOOTH_SANDSTONE_STAIRS,
         SANDSTONE => SMOOTH_SANDSTONE_STAIRS,
         SMOOTH_SANDSTONE => SMOOTH_SANDSTONE_STAIRS,
 
-        // ─── Whites / quartz ────────────────────────────────────────
+        // Whites and quartz
         QUARTZ_BLOCK => POLISHED_DIORITE_STAIRS,
         QUARTZ_BRICKS => POLISHED_DIORITE_STAIRS,
         SMOOTH_QUARTZ => POLISHED_DIORITE_STAIRS,
         WHITE_CONCRETE => QUARTZ_STAIRS,
 
-        // ─── Greys / concretes ──────────────────────────────────────
+        // Greys and concretes
         GRAY_CONCRETE => POLISHED_BLACKSTONE_BRICK_STAIRS,
         LIGHT_GRAY_CONCRETE => STONE_BRICK_STAIRS,
 
-        // ─── Nether-bricks family ───────────────────────────────────
+        // Nether brick family
         NETHER_BRICK => NETHER_BRICK_STAIRS,
-        RED_NETHER_BRICKS => NETHER_BRICK_STAIRS,
+        RED_NETHER_BRICKS => RED_NETHER_BRICK_STAIRS,
 
-        // ─── Coppers (all five variants share cut-copper stairs) ────
+        // Copper family
         WAXED_OXIDIZED_COPPER => WAXED_OXIDIZED_CUT_COPPER_STAIRS,
         WAXED_COPPER_BLOCK => WAXED_CUT_COPPER_STAIRS,
-        WAXED_EXPOSED_COPPER => WAXED_CUT_COPPER_STAIRS,
-        WAXED_EXPOSED_CHISELED_COPPER => WAXED_CUT_COPPER_STAIRS,
-        WAXED_EXPOSED_CUT_COPPER => WAXED_CUT_COPPER_STAIRS,
+        WAXED_EXPOSED_COPPER => WAXED_EXPOSED_CUT_COPPER_STAIRS,
+        WAXED_EXPOSED_CHISELED_COPPER => WAXED_EXPOSED_CUT_COPPER_STAIRS,
+        WAXED_EXPOSED_CUT_COPPER => WAXED_EXPOSED_CUT_COPPER_STAIRS,
 
-        // ─── Wood ───────────────────────────────────────────────────
+        // Wood family
         OAK_PLANKS => OAK_STAIRS,
-        SPRUCE_PLANKS => OAK_STAIRS,
-        DARK_OAK_PLANKS => OAK_STAIRS,
+        SPRUCE_PLANKS => SPRUCE_STAIRS,
+        DARK_OAK_PLANKS => DARK_OAK_STAIRS,
         OAK_LOG => OAK_STAIRS,
-        SPRUCE_LOG => OAK_STAIRS,
+        SPRUCE_LOG => SPRUCE_STAIRS,
 
-        // ─── Misc ───────────────────────────────────────────────────
+        // Misc
         IRON_BLOCK => POLISHED_BLACKSTONE_BRICK_STAIRS,
         HAY_BALE => OAK_STAIRS,
 

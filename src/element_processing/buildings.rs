@@ -5908,6 +5908,7 @@ fn place_roof_blocks_with_stairs(
     roof_heights: &HashMap<(i32, i32), i32>,
     config: &RoofConfig,
     stair_direction_fn: impl Fn(i32, i32, i32) -> BlockWithProperties,
+    footprint: Option<&HashSet<(i32, i32)>>,
 ) {
     // Use empty blacklist to allow overwriting wall/ceiling blocks
     let replace_any: &[Block] = &[];
@@ -5917,7 +5918,17 @@ fn place_roof_blocks_with_stairs(
 
         for y in config.base_height..=roof_height {
             if y == roof_height {
-                let has_lower = has_lower_neighbor(x, z, roof_height, roof_heights);
+                // When a footprint is supplied, treat any cardinal neighbor
+                // sitting outside the polygon as a lower side too: that's a
+                // polygon-edge cell with eave overhang continuing outward, so
+                // it needs a stair on top, not a flat cap.
+                let on_polygon_edge = footprint.is_some_and(|fp| {
+                    [(x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)]
+                        .iter()
+                        .any(|n| !fp.contains(n))
+                });
+                let has_lower =
+                    has_lower_neighbor(x, z, roof_height, roof_heights) || on_polygon_edge;
                 if has_lower {
                     let stair_block = stair_direction_fn(x, z, roof_height);
                     editor.set_block_with_properties_absolute(
@@ -6060,12 +6071,15 @@ fn generate_gabled_roof(
         );
     }
 
+    // Roof body sits 1 row higher than the wall top so the polygon-edge stair
+    // lands at base_height + 1 and the eave overhang inner ring at base_height
+    // forms a continuous 1:1 slope. Cap applies only to the slope boost.
     for &(x, z) in floor_area {
         let pd = &pos_data[&(x, z)];
         let local_boost = ((pd.local_half as f64) * 0.85).round().max(1.0) as i32;
         let capped_boost = local_boost.min(wall_cap);
         let roof_height =
-            (config.base_height + pd.dist_to_edge).min(config.base_height + capped_boost);
+            (config.base_height + pd.dist_to_edge).min(config.base_height + capped_boost) + 1;
         roof_heights.insert((x, z), roof_height);
     }
 
@@ -6150,11 +6164,20 @@ fn generate_gabled_roof(
         };
 
         if is_outer_edge {
-            // Outer edge: single stair at base_height, overwrites existing blocks
+            // Polygon-edge column: roof_block at base_height fills the gap
+            // above the wall, stair at base_height + 1 caps it.
+            editor.set_block_absolute(
+                config.roof_block,
+                x,
+                config.base_height + config.abs_terrain_offset,
+                z,
+                None,
+                Some(replace_any),
+            );
             editor.set_block_with_properties_absolute(
                 get_outer_edge_stair(x, z),
                 x,
-                config.base_height + config.abs_terrain_offset,
+                config.base_height + 1 + config.abs_terrain_offset,
                 z,
                 None,
                 Some(replace_any),
@@ -6209,70 +6232,118 @@ fn generate_gabled_roof(
         &footprint,
     );
 
-    // ── Overhang: extend eave 1 block outward with stairs ──────────
-    // For each position on the eave (outer edge perpendicular to the ridge),
-    // place a stair block 1 block outward at base_height, facing away from
-    // the building. This only extends sideways (perpendicular to the ridge),
-    // not along the gable ends, matching real roof construction.
-    let mut overhang_positions: Vec<(i32, i32, BlockWithProperties)> = Vec::new();
+    // 2-block eave overhang on the slope sides (perpendicular to the ridge).
+    place_eave_overhang(
+        editor,
+        floor_area,
+        &footprint,
+        config,
+        stair_block_material,
+        ridge_runs_along_x,
+    );
+}
+
+// Places a 2-block-deep eave overhang sitting at the wall-top level
+// (base_height - 1). 1st cell out is a flat roof_block, 2nd cell is a
+// stair sloping inward. `ridge_runs_along_x` is None for hipped where
+// every cardinal outward direction gets an overhang; `Some(true|false)`
+// for gabled where only the slope sides get it.
+fn place_eave_overhang(
+    editor: &mut WorldEditor,
+    floor_area: &[(i32, i32)],
+    footprint: &HashSet<(i32, i32)>,
+    config: &RoofConfig,
+    stair_block_material: Block,
+    ridge_runs_along_x: bool,
+) {
+    place_eave_overhang_inner(
+        editor,
+        floor_area,
+        footprint,
+        config,
+        stair_block_material,
+        Some(ridge_runs_along_x),
+    );
+}
+
+fn place_eave_overhang_all_sides(
+    editor: &mut WorldEditor,
+    floor_area: &[(i32, i32)],
+    footprint: &HashSet<(i32, i32)>,
+    config: &RoofConfig,
+    stair_block_material: Block,
+) {
+    place_eave_overhang_inner(
+        editor,
+        floor_area,
+        footprint,
+        config,
+        stair_block_material,
+        None,
+    );
+}
+
+fn place_eave_overhang_inner(
+    editor: &mut WorldEditor,
+    floor_area: &[(i32, i32)],
+    footprint: &HashSet<(i32, i32)>,
+    config: &RoofConfig,
+    stair_block_material: Block,
+    ridge_runs_along_x: Option<bool>,
+) {
+    let abs = config.abs_terrain_offset;
+    // Inner ring (outline+1) sits at wall-top level so it lines up with
+    // the polygon-edge stair, which now sits at base_height (raised by 1
+    // to keep a continuous 1:1 slope from the outer overhang to the peak).
+    // Outer ring (outline+2) sits 1 block lower, forming the eave tip.
+    let y_inner = config.base_height + abs;
+    let y_outer = config.base_height - 1 + abs;
+
+    // Cardinal directions and the stair facing for a stair sitting in that
+    // outward direction. Stair faces back toward the polygon so the high
+    // end points inward and the slope reads as descending outward.
+    let dirs: &[(i32, i32, StairFacing)] = match ridge_runs_along_x {
+        Some(true) => &[(0, -1, StairFacing::South), (0, 1, StairFacing::North)],
+        Some(false) => &[(-1, 0, StairFacing::East), (1, 0, StairFacing::West)],
+        None => &[
+            (-1, 0, StairFacing::East),
+            (1, 0, StairFacing::West),
+            (0, -1, StairFacing::South),
+            (0, 1, StairFacing::North),
+        ],
+    };
+
+    let mut inner_cells: HashMap<(i32, i32), StairFacing> = HashMap::new();
+    let mut outer_cells: HashMap<(i32, i32), StairFacing> = HashMap::new();
 
     for &(x, z) in floor_area {
-        if ridge_runs_along_x {
-            // Eave runs along X; overhang extends in +Z / -Z direction
-            if !footprint.contains(&(x, z - 1)) {
-                // North eave — place overhang 1 block further north
-                let oz = z - 1;
-                let stair = create_stair_with_properties(
-                    stair_block_material,
-                    StairFacing::South,
-                    StairShape::Straight,
-                );
-                overhang_positions.push((x, oz, stair));
+        for &(dx, dz, facing) in dirs {
+            let n1 = (x + dx, z + dz);
+            let n2 = (x + 2 * dx, z + 2 * dz);
+            if footprint.contains(&n1) {
+                continue;
             }
-            if !footprint.contains(&(x, z + 1)) {
-                // South eave — place overhang 1 block further south
-                let oz = z + 1;
-                let stair = create_stair_with_properties(
-                    stair_block_material,
-                    StairFacing::North,
-                    StairShape::Straight,
-                );
-                overhang_positions.push((x, oz, stair));
-            }
-        } else {
-            // Eave runs along Z; overhang extends in +X / -X direction
-            if !footprint.contains(&(x - 1, z)) {
-                let ox = x - 1;
-                let stair = create_stair_with_properties(
-                    stair_block_material,
-                    StairFacing::East,
-                    StairShape::Straight,
-                );
-                overhang_positions.push((ox, z, stair));
-            }
-            if !footprint.contains(&(x + 1, z)) {
-                let ox = x + 1;
-                let stair = create_stair_with_properties(
-                    stair_block_material,
-                    StairFacing::West,
-                    StairShape::Straight,
-                );
-                overhang_positions.push((ox, z, stair));
+            inner_cells.entry(n1).or_insert(facing);
+            if !footprint.contains(&n2) {
+                outer_cells.entry(n2).or_insert(facing);
             }
         }
     }
 
-    for (ox, oz, stair) in overhang_positions {
-        // No whitelist — overhang stairs must overwrite wall depth pillars
-        // that extend to this Y level
-        editor.set_block_with_properties_absolute(
-            stair,
-            ox,
-            config.base_height - 1 + config.abs_terrain_offset,
-            oz,
-            None,
-            None,
-        );
+    for (cell, facing) in &inner_cells {
+        let stair =
+            create_stair_with_properties(stair_block_material, *facing, StairShape::Straight);
+        editor.set_block_with_properties_absolute(stair, cell.0, y_inner, cell.1, None, None);
+    }
+    // Outer ring skips cells already claimed by the inner ring (e.g. where
+    // a long wall and a short wall meet at a corner).
+    for (cell, facing) in &outer_cells {
+        if inner_cells.contains_key(cell) {
+            continue;
+        }
+        let stair =
+            create_stair_with_properties(stair_block_material, *facing, StairShape::Straight);
+        editor.set_block_with_properties_absolute(stair, cell.0, y_outer, cell.1, None, None);
     }
 }
 
@@ -6354,204 +6425,218 @@ fn generate_hipped_roof(editor: &mut WorldEditor, floor_area: &[(i32, i32)], con
     // Per-position roof heights using full-pitch slope.
     let mut roof_heights: HashMap<(i32, i32), i32> = HashMap::new();
 
+    // Same +1 lift as gabled: polygon-edge cells land at base_height + 1 so
+    // the inner eave overhang ring at base_height continues the slope cleanly.
     for &(x, z) in floor_area {
         let pd = &pos_data[&(x, z)];
         let local_boost = ((pd.local_half as f64) * 0.85).round().max(1.0) as i32;
         let capped_boost = local_boost.min(wall_cap);
         let roof_height =
-            (config.base_height + pd.dist_to_edge).min(config.base_height + capped_boost);
+            (config.base_height + pd.dist_to_edge).min(config.base_height + capped_boost) + 1;
         roof_heights.insert((x, z), roof_height);
     }
 
     // --- Place blocks with stair facing toward nearest polygon edge ---
     let stair_block_material = get_stair_block_for_material(config.roof_block);
 
-    place_roof_blocks_with_stairs(editor, floor_area, &roof_heights, config, |x, z, h| {
-        // Stair-shape selection from the 4 cardinal neighbour heights.
-        //
-        // Convention recap (matches gabled `get_outer_edge_stair`):
-        //   - StairFacing::X means the high end of the stair is on the X side;
-        //     the slope descends in the OPPOSITE direction. So if the slope
-        //     descends north (i.e. N neighbour is lower), the stair "faces
-        //     south" (high south).
-        //   - StairShape::OuterRight on a stair facing E puts the top-half
-        //     L-corner at SE; on facing S it puts it at SW; on E + OuterLeft
-        //     at NE; on N + OuterLeft at NW. Outer corners are emitted only
-        //     when *exactly two* perpendicular neighbours are lower —
-        //     classic hipped-roof corner geometry.
-        //
-        // Bug-fix vs. the previous version: when *three* neighbours are
-        // lower (e.g. the W-tip of a 45°-rotated diamond polygon, where
-        // N+S+W are all outside the polygon), the old code matched the
-        // first `lower_n && lower_w` branch and emitted an OuterRight
-        // stair — giving the diamond tip a wonky lopsided wedge instead of
-        // the simple straight slope it actually has. We now count first and
-        // only use Outer shapes for the proper 2-perpendicular case; the
-        // 3-lower case falls through to a Straight stair facing the only
-        // remaining higher direction, and the 4-lower (apex) / 0-lower
-        // (plateau) / 2-opposite (ridge) cases use the closest-edge
-        // fallback.
-        let north_h = roof_heights
-            .get(&(x, z - 1))
-            .copied()
-            .unwrap_or(config.base_height);
-        let south_h = roof_heights
-            .get(&(x, z + 1))
-            .copied()
-            .unwrap_or(config.base_height);
-        let west_h = roof_heights
-            .get(&(x - 1, z))
-            .copied()
-            .unwrap_or(config.base_height);
-        let east_h = roof_heights
-            .get(&(x + 1, z))
-            .copied()
-            .unwrap_or(config.base_height);
-        let lower_n = north_h < h;
-        let lower_s = south_h < h;
-        let lower_w = west_h < h;
-        let lower_e = east_h < h;
-        let lower_count = (lower_n as i32) + (lower_s as i32) + (lower_w as i32) + (lower_e as i32);
+    place_roof_blocks_with_stairs(
+        editor,
+        floor_area,
+        &roof_heights,
+        config,
+        |x, z, h| {
+            // Stair-shape selection from the 4 cardinal neighbour heights.
+            //
+            // Convention recap (matches gabled `get_outer_edge_stair`):
+            //   - StairFacing::X means the high end of the stair is on the X side;
+            //     the slope descends in the OPPOSITE direction. So if the slope
+            //     descends north (i.e. N neighbour is lower), the stair "faces
+            //     south" (high south).
+            //   - StairShape::OuterRight on a stair facing E puts the top-half
+            //     L-corner at SE; on facing S it puts it at SW; on E + OuterLeft
+            //     at NE; on N + OuterLeft at NW. Outer corners are emitted only
+            //     when *exactly two* perpendicular neighbours are lower —
+            //     classic hipped-roof corner geometry.
+            //
+            // Bug-fix vs. the previous version: when *three* neighbours are
+            // lower (e.g. the W-tip of a 45°-rotated diamond polygon, where
+            // N+S+W are all outside the polygon), the old code matched the
+            // first `lower_n && lower_w` branch and emitted an OuterRight
+            // stair — giving the diamond tip a wonky lopsided wedge instead of
+            // the simple straight slope it actually has. We now count first and
+            // only use Outer shapes for the proper 2-perpendicular case; the
+            // 3-lower case falls through to a Straight stair facing the only
+            // remaining higher direction, and the 4-lower (apex) / 0-lower
+            // (plateau) / 2-opposite (ridge) cases use the closest-edge
+            // fallback.
+            let north_h = roof_heights
+                .get(&(x, z - 1))
+                .copied()
+                .unwrap_or(config.base_height);
+            let south_h = roof_heights
+                .get(&(x, z + 1))
+                .copied()
+                .unwrap_or(config.base_height);
+            let west_h = roof_heights
+                .get(&(x - 1, z))
+                .copied()
+                .unwrap_or(config.base_height);
+            let east_h = roof_heights
+                .get(&(x + 1, z))
+                .copied()
+                .unwrap_or(config.base_height);
+            let lower_n = north_h < h;
+            let lower_s = south_h < h;
+            let lower_w = west_h < h;
+            let lower_e = east_h < h;
+            let lower_count =
+                (lower_n as i32) + (lower_s as i32) + (lower_w as i32) + (lower_e as i32);
 
-        // Outer corner — exactly 2 perpendicular sides lower.
-        if lower_count == 2 {
-            if lower_n && lower_w {
-                return create_stair_with_properties(
-                    stair_block_material,
-                    StairFacing::East,
-                    StairShape::OuterRight,
-                );
+            // Outer corner — exactly 2 perpendicular sides lower.
+            if lower_count == 2 {
+                if lower_n && lower_w {
+                    return create_stair_with_properties(
+                        stair_block_material,
+                        StairFacing::East,
+                        StairShape::OuterRight,
+                    );
+                }
+                if lower_n && lower_e {
+                    return create_stair_with_properties(
+                        stair_block_material,
+                        StairFacing::South,
+                        StairShape::OuterRight,
+                    );
+                }
+                if lower_s && lower_w {
+                    return create_stair_with_properties(
+                        stair_block_material,
+                        StairFacing::East,
+                        StairShape::OuterLeft,
+                    );
+                }
+                if lower_s && lower_e {
+                    return create_stair_with_properties(
+                        stair_block_material,
+                        StairFacing::North,
+                        StairShape::OuterLeft,
+                    );
+                }
+                // 2-opposite (N+S or W+E): on a "ridge" — fall through.
             }
-            if lower_n && lower_e {
-                return create_stair_with_properties(
-                    stair_block_material,
-                    StairFacing::South,
-                    StairShape::OuterRight,
-                );
-            }
-            if lower_s && lower_w {
-                return create_stair_with_properties(
-                    stair_block_material,
-                    StairFacing::East,
-                    StairShape::OuterLeft,
-                );
-            }
-            if lower_s && lower_e {
-                return create_stair_with_properties(
-                    stair_block_material,
-                    StairFacing::North,
-                    StairShape::OuterLeft,
-                );
-            }
-            // 2-opposite (N+S or W+E): on a "ridge" — fall through.
-        }
 
-        // Single-sided slope (exactly one lower).
-        if lower_count == 1 {
-            if lower_n {
-                return create_stair_with_properties(
-                    stair_block_material,
-                    StairFacing::South,
-                    StairShape::Straight,
-                );
+            // Single-sided slope (exactly one lower).
+            if lower_count == 1 {
+                if lower_n {
+                    return create_stair_with_properties(
+                        stair_block_material,
+                        StairFacing::South,
+                        StairShape::Straight,
+                    );
+                }
+                if lower_s {
+                    return create_stair_with_properties(
+                        stair_block_material,
+                        StairFacing::North,
+                        StairShape::Straight,
+                    );
+                }
+                if lower_w {
+                    return create_stair_with_properties(
+                        stair_block_material,
+                        StairFacing::East,
+                        StairShape::Straight,
+                    );
+                }
+                if lower_e {
+                    return create_stair_with_properties(
+                        stair_block_material,
+                        StairFacing::West,
+                        StairShape::Straight,
+                    );
+                }
             }
-            if lower_s {
-                return create_stair_with_properties(
-                    stair_block_material,
-                    StairFacing::North,
-                    StairShape::Straight,
-                );
-            }
-            if lower_w {
-                return create_stair_with_properties(
-                    stair_block_material,
-                    StairFacing::East,
-                    StairShape::Straight,
-                );
-            }
-            if lower_e {
-                return create_stair_with_properties(
-                    stair_block_material,
-                    StairFacing::West,
-                    StairShape::Straight,
-                );
-            }
-        }
 
-        // Three sides lower → diamond tip / similar narrow protrusion.
-        // Face the *only* higher direction with a plain Straight stair;
-        // an outer-corner shape would clip oddly here because the slope
-        // really does descend in three directions, not just two.
-        if lower_count == 3 {
-            if !lower_n {
-                return create_stair_with_properties(
-                    stair_block_material,
-                    StairFacing::North,
-                    StairShape::Straight,
-                );
+            // Three sides lower → diamond tip / similar narrow protrusion.
+            // Face the *only* higher direction with a plain Straight stair;
+            // an outer-corner shape would clip oddly here because the slope
+            // really does descend in three directions, not just two.
+            if lower_count == 3 {
+                if !lower_n {
+                    return create_stair_with_properties(
+                        stair_block_material,
+                        StairFacing::North,
+                        StairShape::Straight,
+                    );
+                }
+                if !lower_s {
+                    return create_stair_with_properties(
+                        stair_block_material,
+                        StairFacing::South,
+                        StairShape::Straight,
+                    );
+                }
+                if !lower_w {
+                    return create_stair_with_properties(
+                        stair_block_material,
+                        StairFacing::West,
+                        StairShape::Straight,
+                    );
+                }
+                if !lower_e {
+                    return create_stair_with_properties(
+                        stair_block_material,
+                        StairFacing::East,
+                        StairShape::Straight,
+                    );
+                }
             }
-            if !lower_s {
-                return create_stair_with_properties(
-                    stair_block_material,
-                    StairFacing::South,
-                    StairShape::Straight,
-                );
-            }
-            if !lower_w {
-                return create_stair_with_properties(
-                    stair_block_material,
-                    StairFacing::West,
-                    StairShape::Straight,
-                );
-            }
-            if !lower_e {
-                return create_stair_with_properties(
-                    stair_block_material,
-                    StairFacing::East,
-                    StairShape::Straight,
-                );
-            }
-        }
 
-        // 0 lower (plateau / interior ridge) and 4 lower (apex): fall back
-        // to the closest-polygon-edge heuristic. This preserves the legacy
-        // appearance for axis-aligned buildings.
-        let dir = pos_data.get(&(x, z)).map(|pd| pd.closest_dir).unwrap_or(0);
-        match dir {
-            0 => {
-                // Closest edge is -X, stair faces east (toward centre)
-                create_stair_with_properties(
-                    stair_block_material,
-                    StairFacing::East,
-                    StairShape::Straight,
-                )
+            // 0 lower (plateau / interior ridge) and 4 lower (apex): fall back
+            // to the closest-polygon-edge heuristic. This preserves the legacy
+            // appearance for axis-aligned buildings.
+            let dir = pos_data.get(&(x, z)).map(|pd| pd.closest_dir).unwrap_or(0);
+            match dir {
+                0 => {
+                    // Closest edge is -X, stair faces east (toward centre)
+                    create_stair_with_properties(
+                        stair_block_material,
+                        StairFacing::East,
+                        StairShape::Straight,
+                    )
+                }
+                1 => {
+                    // Closest edge is +X, stair faces west
+                    create_stair_with_properties(
+                        stair_block_material,
+                        StairFacing::West,
+                        StairShape::Straight,
+                    )
+                }
+                2 => {
+                    // Closest edge is -Z, stair faces south
+                    create_stair_with_properties(
+                        stair_block_material,
+                        StairFacing::South,
+                        StairShape::Straight,
+                    )
+                }
+                _ => {
+                    // Closest edge is +Z, stair faces north
+                    create_stair_with_properties(
+                        stair_block_material,
+                        StairFacing::North,
+                        StairShape::Straight,
+                    )
+                }
             }
-            1 => {
-                // Closest edge is +X, stair faces west
-                create_stair_with_properties(
-                    stair_block_material,
-                    StairFacing::West,
-                    StairShape::Straight,
-                )
-            }
-            2 => {
-                // Closest edge is -Z, stair faces south
-                create_stair_with_properties(
-                    stair_block_material,
-                    StairFacing::South,
-                    StairShape::Straight,
-                )
-            }
-            _ => {
-                // Closest edge is +Z, stair faces north
-                create_stair_with_properties(
-                    stair_block_material,
-                    StairFacing::North,
-                    StairShape::Straight,
-                )
-            }
-        }
-    });
+        },
+        Some(&footprint),
+    );
+
+    // 2-block eave overhang on every cardinal side, since hipped slopes
+    // descend on all four sides.
+    place_eave_overhang_all_sides(editor, floor_area, &footprint, config, stair_block_material);
 }
 
 /// Generates a skillion (mono-pitch) roof
@@ -6572,13 +6657,20 @@ fn generate_skillion_roof(
 
     let stair_block_material = get_stair_block_for_material(config.roof_block);
 
-    place_roof_blocks_with_stairs(editor, floor_area, &roof_heights, config, |_, _, _| {
-        create_stair_with_properties(
-            stair_block_material,
-            StairFacing::East,
-            StairShape::Straight,
-        )
-    });
+    place_roof_blocks_with_stairs(
+        editor,
+        floor_area,
+        &roof_heights,
+        config,
+        |_, _, _| {
+            create_stair_with_properties(
+                stair_block_material,
+                StairFacing::East,
+                StairShape::Straight,
+            )
+        },
+        None,
+    );
 }
 
 /// Generates a pyramidal roof
