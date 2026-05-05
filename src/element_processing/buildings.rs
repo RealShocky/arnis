@@ -3839,15 +3839,12 @@ fn calculate_roof_peak_height(
 /// buildings get a pitched roof instead of falling through to Flat.
 fn parse_roof_type(roof_shape: &str) -> RoofType {
     match roof_shape {
-        // Gabled variants: "pitched" is a common synonym; saltbox/gabled_row
-        // are asymmetric/repeated gables that still read as gabled at block
-        // resolution.
-        "gabled" | "pitched" | "saltbox" | "double_saltbox" | "quadruple_saltbox"
+        "gabled" | "gable" | "pitched" | "saltbox" | "double_saltbox" | "quadruple_saltbox"
         | "gabled_row" => RoofType::Gabled,
-        "hipped" | "half-hipped" | "gambrel" | "mansard" | "round" | "side_hipped"
+        "hipped" | "hip" | "half-hipped" | "gambrel" | "mansard" | "round" | "side_hipped"
         | "side_half-hipped" => RoofType::Hipped,
-        "skillion" | "lean_to" => RoofType::Skillion,
-        "pyramidal" => RoofType::Pyramidal,
+        "skillion" | "shed" | "lean_to" | "monopitch" => RoofType::Skillion,
+        "pyramidal" | "pyramid" => RoofType::Pyramidal,
         "dome" | "spherical" => RoofType::Dome,
         "cone" | "conical" | "circular" | "spire" => RoofType::Cone,
         "onion" => RoofType::Onion,
@@ -4299,6 +4296,7 @@ pub fn generate_buildings(
                     abs_terrain_offset,
                     is_abandoned_building,
                     effective_passages,
+                    has_sloped_roof,
                 );
             }
         }

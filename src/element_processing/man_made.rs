@@ -327,6 +327,12 @@ fn read_height(element: &ProcessedElement, default: i32, scale_factor: f64) -> i
 /// `water_tower` / `silo` / `storage_tank`). Dispatches to the right
 /// renderer based on the most specific tag available.
 pub fn generate_tank_structure(editor: &mut WorldEditor, element: &ProcessedElement, args: &Args) {
+    // Skip relations and other elements that have no node geometry; the
+    // renderers below would otherwise build at world origin (0, 0).
+    if element.nodes().next().is_none() {
+        return;
+    }
+
     let kind = element
         .tags()
         .get("man_made")

@@ -1098,6 +1098,7 @@ pub fn get_stair_block_for_material(material: Block) -> Block {
         QUARTZ_BRICKS => POLISHED_DIORITE_STAIRS,
         SMOOTH_QUARTZ => POLISHED_DIORITE_STAIRS,
         WHITE_CONCRETE => QUARTZ_STAIRS,
+        GLASS => QUARTZ_STAIRS,
 
         // Greys and concretes
         GRAY_CONCRETE => POLISHED_BLACKSTONE_BRICK_STAIRS,
@@ -1552,8 +1553,7 @@ pub fn get_roof_block_for_material(material: &str, rng: &mut impl rand::Rng) -> 
         .collect();
 
     let options: &[Block] = match normalized.as_str() {
-        // Glass has no stair variant; pick a quartz-family substitute so sloped roofs stay consistent.
-        "glass" | "glazing" => &[SMOOTH_QUARTZ, QUARTZ_BLOCK],
+        "glass" | "glazing" => &[GLASS],
         "tile" | "tiles" | "rooftiles" | "ceramic" | "ceramictiles" | "claytile" | "claytiles"
         | "terracotta" => &[BRICK, NETHER_BRICK, RED_NETHER_BRICKS, MUD_BRICKS],
         "slate" | "slates" => &[POLISHED_BLACKSTONE, DEEPSLATE_BRICKS, BLACKSTONE],
