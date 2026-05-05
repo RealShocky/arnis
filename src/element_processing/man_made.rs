@@ -219,7 +219,7 @@ impl TankFootprint {
         }
 
         if nodes.len() < 3 {
-            // Single-node mapping — use a default 5×5 footprint around the
+            // Single-node mapping - use a default 5×5 footprint around the
             // point so tank structures still have visible bulk even when
             // mapped as a POI.
             let (cx, cz) = nodes[0];
@@ -335,7 +335,7 @@ pub fn generate_tank_structure(editor: &mut WorldEditor, element: &ProcessedElem
     }
 }
 
-/// Generate a water tower — a tall cylindrical / rectangular tank
+/// Generate a water tower - a tall cylindrical / rectangular tank
 /// elevated on legs. Polygon-aware: legs are placed at the polygon
 /// corners (or 4 cardinal points for round mappings), and the tank
 /// itself is a filled cylinder clipped to the polygon outline.
@@ -373,7 +373,7 @@ fn generate_water_tower(editor: &mut WorldEditor, element: &ProcessedElement) {
         }
     }
 
-    // Cross-bracing every 5 blocks of height — gives the tower its
+    // Cross-bracing every 5 blocks of height - gives the tower its
     // characteristic lattice silhouette. Bracing follows the polygon
     // outline (bresenham between consecutive nodes) at the tier height.
     if let ProcessedElement::Way(way) = element {
@@ -417,7 +417,7 @@ fn generate_water_tower(editor: &mut WorldEditor, element: &ProcessedElement) {
     }
 }
 
-/// Generate a silo — a tall cylindrical narrow tower. Polygon-aware
+/// Generate a silo - a tall cylindrical narrow tower. Polygon-aware
 /// filled cylinder running floor-to-cap. Material follows
 /// `building:material=*` (cement/stone → smooth stone; metal → iron;
 /// default smooth stone).
@@ -447,12 +447,12 @@ fn generate_silo(editor: &mut WorldEditor, element: &ProcessedElement) {
     }
 }
 
-/// Generate a storage tank — short squat cylinder. Material follows
+/// Generate a storage tank - short squat cylinder. Material follows
 /// `content=*` for a colour hint (water → light grey, oil → black,
 /// gas/lng → white).
 fn generate_storage_tank(editor: &mut WorldEditor, element: &ProcessedElement) {
     let footprint = TankFootprint::from_element(element);
-    // Storage tanks are visibly short — much wider than tall in real
+    // Storage tanks are visibly short - much wider than tall in real
     // life. Default 8, capped to 1.5× radius so very wide mappings don't
     // produce skyscrapers.
     let default_h = ((footprint.radius * 1.2).round() as i32).max(6);
