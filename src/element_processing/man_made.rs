@@ -286,16 +286,21 @@ impl TankFootprint {
     }
 }
 
-/// Standard ray-cast point-in-polygon test (counts ray crossings).
+/// Ray-cast point-in-polygon test sampling the cell centre.
 fn point_in_polygon(px: i32, pz: i32, polygon: &[(i32, i32)]) -> bool {
+    let px = px as f64 + 0.5;
+    let pz = pz as f64 + 0.5;
     let mut inside = false;
     let n = polygon.len();
     let mut j = n.wrapping_sub(1);
     for i in 0..n {
         let (xi, zi) = polygon[i];
         let (xj, zj) = polygon[j];
-        let intersect = ((zi > pz) != (zj > pz))
-            && (px as f64) < (xj - xi) as f64 * (pz - zi) as f64 / (zj - zi) as f64 + xi as f64;
+        let zi = zi as f64;
+        let zj = zj as f64;
+        let xi = xi as f64;
+        let xj = xj as f64;
+        let intersect = ((zi > pz) != (zj > pz)) && (px < (xj - xi) * (pz - zi) / (zj - zi) + xi);
         if intersect {
             inside = !inside;
         }

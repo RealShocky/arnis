@@ -52,27 +52,23 @@ pub fn repair_terrain_anomalies(heights: &mut [Vec<f64>]) {
                 .for_each(|(dst, src)| dst.clone_from(src));
         }
 
-        // Each row read-set fits inside `snapshot[y - r ..= y + r]`, and the
-        // write-set is the same row of `heights`. Building (row_index,
-        // patch) tuples in parallel is then trivially safe — there's no
-        // shared mutation. We only emit a tuple when at least one cell in
-        // that row needs rewriting, keeping the merge step cheap on a clean
-        // late pass.
+        // Stream writes directly into `heights` per row in parallel, reading
+        // from the immutable snapshot. Avoids buffering all changes in a Vec.
         let snapshot_ref: &[Vec<f64>] = &snapshot;
-        let row_results: Vec<(usize, Vec<(usize, f64)>)> = (r..grid_h - r)
-            .into_par_iter()
+        let repaired: usize = heights
+            .par_iter_mut()
+            .enumerate()
+            .filter(|(y, _)| *y >= r && *y < grid_h - r)
             .map_init(
                 || (Vec::with_capacity(24), Vec::with_capacity(24)),
-                |(neighbors, abs_devs), y| {
-                    let mut row_changes: Vec<(usize, f64)> = Vec::new();
-
+                |(neighbors, abs_devs), (y, row)| {
+                    let mut row_repaired = 0usize;
                     for x in r..grid_w - r {
                         let center = snapshot_ref[y][x];
                         if !center.is_finite() {
                             continue;
                         }
 
-                        // Collect finite neighbors in the 5x5 window.
                         neighbors.clear();
                         for dy in -RADIUS..=RADIUS {
                             for dx in -RADIUS..=RADIUS {
@@ -90,14 +86,10 @@ pub fn repair_terrain_anomalies(heights: &mut [Vec<f64>]) {
                             continue;
                         }
 
-                        // Median of neighbors — O(n) via select_nth.
                         let mid = neighbors.len() / 2;
                         neighbors.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap());
                         let median = neighbors[mid];
 
-                        // MAD (median absolute deviation) — robust scale estimator.
-                        // High MAD = real terrain variation → large deviations allowed.
-                        // Low MAD = flat area → even moderate spikes get caught.
                         abs_devs.clear();
                         abs_devs.extend(neighbors.iter().map(|&v| (v - median).abs()));
                         let mad_mid = abs_devs.len() / 2;
@@ -106,23 +98,14 @@ pub fn repair_terrain_anomalies(heights: &mut [Vec<f64>]) {
 
                         let deviation = (center - median).abs();
                         if deviation > ABS_THRESHOLD && deviation > RELATIVE_FACTOR * mad.max(1.0) {
-                            row_changes.push((x, median));
+                            row[x] = median;
+                            row_repaired += 1;
                         }
                     }
-
-                    (y, row_changes)
+                    row_repaired
                 },
             )
-            .filter(|(_, changes)| !changes.is_empty())
-            .collect();
-
-        let mut repaired = 0usize;
-        for (y, changes) in row_results {
-            for (x, v) in changes {
-                heights[y][x] = v;
-                repaired += 1;
-            }
-        }
+            .sum();
 
         if repaired == 0 {
             break;

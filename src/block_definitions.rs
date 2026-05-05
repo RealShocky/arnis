@@ -1552,7 +1552,8 @@ pub fn get_roof_block_for_material(material: &str, rng: &mut impl rand::Rng) -> 
         .collect();
 
     let options: &[Block] = match normalized.as_str() {
-        "glass" | "glazing" => &[GLASS],
+        // Glass has no stair variant; pick a quartz-family substitute so sloped roofs stay consistent.
+        "glass" | "glazing" => &[SMOOTH_QUARTZ, QUARTZ_BLOCK],
         "tile" | "tiles" | "rooftiles" | "ceramic" | "ceramictiles" | "claytile" | "claytiles"
         | "terracotta" => &[BRICK, NETHER_BRICK, RED_NETHER_BRICKS, MUD_BRICKS],
         "slate" | "slates" => &[POLISHED_BLACKSTONE, DEEPSLATE_BRICKS, BLACKSTONE],

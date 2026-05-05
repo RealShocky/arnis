@@ -1626,10 +1626,11 @@ fn generate_roof_only_structure(
         .unwrap_or(RoofType::Flat);
 
     match roof_type {
-        RoofType::Dome | RoofType::Hipped | RoofType::Pyramidal => {
-            // Standalone roof parts with curved or sloped shapes are rendered
-            // as domes.  Without supporting walls, the dome approximation
-            // produces the best visual result for shell-like roof structures.
+        RoofType::Dome
+        | RoofType::Hipped
+        | RoofType::Pyramidal
+        | RoofType::Cone
+        | RoofType::Onion => {
             if !cached_floor_area.is_empty() {
                 let (min_x, max_x, min_z, max_z) = cached_floor_area.iter().fold(
                     (i32::MAX, i32::MIN, i32::MAX, i32::MIN),
@@ -1637,9 +1638,6 @@ fn generate_roof_only_structure(
                         (min_x.min(x), max_x.max(x), min_z.min(z), max_z.max(z))
                     },
                 );
-                // For roof-only structures, base_height is the elevation where
-                // the dome starts (not on top of walls as in from_roof_area),
-                // since there is no building body underneath.
                 let config = RoofConfig {
                     min_x,
                     max_x,
@@ -1648,13 +1646,17 @@ fn generate_roof_only_structure(
                     center_x: (min_x + max_x) >> 1,
                     center_z: (min_z + max_z) >> 1,
                     base_height: start_y_offset,
-                    building_height: 4, // roof-only structure, no real walls
+                    building_height: 4,
                     abs_terrain_offset,
                     roof_block,
                     add_dormers: false,
                     element_id_for_decor: element.id,
                 };
-                generate_dome_roof(editor, cached_floor_area, &config);
+                match roof_type {
+                    RoofType::Cone => generate_cone_roof(editor, cached_floor_area, &config),
+                    RoofType::Onion => generate_onion_roof(editor, cached_floor_area, &config),
+                    _ => generate_dome_roof(editor, cached_floor_area, &config),
+                }
             }
         }
         _ => {
